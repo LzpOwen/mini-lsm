@@ -6,3 +6,7 @@ compile_commands.json
 *.a
 *.log
 .DS_Store
+
+# bazel
+bazel-*
+MODULE.bazel.lock

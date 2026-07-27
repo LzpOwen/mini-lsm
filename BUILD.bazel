@@ -1,0 +1,20 @@
+package(default_visibility = ["//visibility:public"])
+
+# 核心引擎库。
+# 头文件放在 include/ 下，以 "mlsm/xxx.h" 形式被引用（includes = ["include"] 提供 -Iinclude）。
+# 新增源文件时，把它加进 srcs（glob 已自动覆盖 src/*.cc）。
+cc_library(
+    name = "mlsm",
+    srcs = glob(["src/*.cc"]),
+    hdrs = glob(["include/mlsm/*.h"]),
+    includes = ["include"],
+)
+
+cc_test(
+    name = "mlsm_test",
+    srcs = glob(["test/*.cc"]),
+    deps = [
+        ":mlsm",
+        "@googletest//:gtest_main",
+    ],
+)

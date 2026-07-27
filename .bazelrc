@@ -1,0 +1,13 @@
+# C++17，和 CMake 保持一致
+build --cxxopt=-std=c++17
+build --host_cxxopt=-std=c++17
+
+# 编译告警（对齐 CMake 的 -Wall -Wextra）
+build --copt=-Wall
+build --copt=-Wextra
+
+# 使用 bzlmod（Bazel 7+ 默认开启，这里显式声明以兼容旧版本）
+common --enable_bzlmod
+
+# 测试输出：失败时打印日志
+test --test_output=errors

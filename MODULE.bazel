@@ -1,0 +1,8 @@
+module(
+    name = "mini_lsm",
+    version = "0.1.0",
+)
+
+# 依赖来自 Bazel Central Registry (BCR)。
+# googletest 用于单元测试。
+bazel_dep(name = "googletest", version = "1.14.0")
