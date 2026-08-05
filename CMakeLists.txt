@@ -16,6 +16,7 @@ add_compile_options(-Wall -Wextra -Wpedantic)
 add_library(mlsm
   src/crc32c.cc
   src/wal_writer.cc
+  src/wal_reader.cc
 )
 target_include_directories(mlsm PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
@@ -38,6 +39,7 @@ add_executable(mlsm_test
   test/sanity_test.cc
   test/crc32c_test.cc
   test/wal_writer_test.cc
+  test/wal_reader_test.cc
 )
 target_link_libraries(mlsm_test PRIVATE mlsm GTest::gtest_main)
 gtest_discover_tests(mlsm_test)

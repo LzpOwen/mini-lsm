@@ -1,26 +1,11 @@
 #include "mlsm/wal_writer.h"
 
-#include <cstring>
-
+#include "mlsm/coding.h"
 #include "mlsm/crc32c.h"
 #include "mlsm/writable_file.h"
 
 namespace mlsm {
 namespace log {
-
-namespace {
-
-// Little-endian fixed-width encode. commit 4's Reader will need the matching
-// decode; we'll factor a shared coding.h out then rather than guess at it now.
-void EncodeFixed32(char* dst, uint32_t value) {
-  uint8_t* p = reinterpret_cast<uint8_t*>(dst);
-  p[0] = static_cast<uint8_t>(value & 0xff);
-  p[1] = static_cast<uint8_t>((value >> 8) & 0xff);
-  p[2] = static_cast<uint8_t>((value >> 16) & 0xff);
-  p[3] = static_cast<uint8_t>((value >> 24) & 0xff);
-}
-
-}  // namespace
 
 Writer::Writer(WritableFile* dest) : dest_(dest), block_offset_(0) {
   for (int i = 0; i <= kMaxRecordType; ++i) {
