@@ -18,3 +18,10 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+# 手动跑的性能工具，不进 test。用法：bazel run //:db_bench -- [num_entries]
+cc_binary(
+    name = "db_bench",
+    srcs = ["bench/db_bench.cc"],
+    deps = [":mlsm"],
+)

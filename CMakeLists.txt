@@ -46,3 +46,7 @@ add_executable(mlsm_test
 )
 target_link_libraries(mlsm_test PRIVATE mlsm GTest::gtest_main)
 gtest_discover_tests(mlsm_test)
+
+# ---- benchmark (manual perf tool, not part of ctest) ----
+add_executable(db_bench bench/db_bench.cc)
+target_link_libraries(db_bench PRIVATE mlsm)
