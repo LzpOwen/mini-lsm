@@ -51,6 +51,12 @@ class Writer {
  public:
   explicit Writer(WritableFile* dest);
 
+  // Resumes writing to a WAL that already holds dest_length bytes. The block
+  // cursor is seeded from the existing length so records stay block-aligned;
+  // without this, resuming a non-empty log would let a record straddle a 32KB
+  // boundary and corrupt the format.
+  Writer(WritableFile* dest, uint64_t dest_length);
+
   Writer(const Writer&) = delete;
   Writer& operator=(const Writer&) = delete;
 

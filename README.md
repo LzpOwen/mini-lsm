@@ -41,7 +41,7 @@ bazel build //...    # 只编译
 - [x] commit 2：CRC32C（Castagnoli 多项式，含 Mask/Unmask，对齐 LevelDB/RocksDB）
 - [x] commit 3：WAL Writer（record 格式，按 32KB block 切分）
 - [x] commit 4：WAL Reader（读回 + crc 校验 + 残缺 record 识别）
-- [ ] commit 5：DB 接口 + WAL 打通写路径 + 崩溃恢复
+- [x] commit 5：DB 接口 + WAL 打通写路径 + 崩溃恢复
 - [ ] commit 6：benchmark 骨架
 
 ## 布局

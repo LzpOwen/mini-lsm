@@ -7,7 +7,11 @@
 namespace mlsm {
 namespace log {
 
-Writer::Writer(WritableFile* dest) : dest_(dest), block_offset_(0) {
+Writer::Writer(WritableFile* dest) : Writer(dest, 0) {}
+
+Writer::Writer(WritableFile* dest, uint64_t dest_length)
+    : dest_(dest),
+      block_offset_(static_cast<int>(dest_length % kBlockSize)) {
   for (int i = 0; i <= kMaxRecordType; ++i) {
     char t = static_cast<char>(i);
     type_crc_[i] = crc32c::Value(&t, 1);
