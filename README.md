@@ -49,7 +49,7 @@ bazel build //...    # 只编译
 确定性消息驱动核心（对齐 etcd/raft、TiKV raft-rs）：纯状态机，`Step(msg)` + `Tick()` 输入，产出待发消息，不起线程、不碰真实时间。独立 `mlsm_raft` 库。
 
 - [x] raft-1：Leader 选举（term/votedFor、RequestVote、选举超时与心跳、角色转换）
-- [ ] raft-2：日志复制（AppendEntries、日志 up-to-date 比较、commit index）
+- [x] raft-2：日志复制（AppendEntries、日志 up-to-date 比较、commit index）
 - [ ] raft-3：hard state 持久化 + 崩溃恢复
 - [ ] raft-4：接到 DB 写路径（Put/Delete 走 Raft 日志）
 

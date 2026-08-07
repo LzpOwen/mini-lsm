@@ -2,6 +2,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
+#include <string>
 #include <vector>
 
 #include "mlsm/raft/messages.h"
@@ -44,11 +46,26 @@ class Raft {
   // Removes and returns the messages queued for delivery since the last call.
   std::vector<Message> TakeMessages();
 
+  // Proposes a new command. Only a leader accepts it: the entry is appended to
+  // the local log at index LastIndex()+1 with the current term, and replication
+  // happens on subsequent broadcasts. Returns false (and does nothing) if this
+  // node is not the leader.
+  bool Propose(const std::string& data);
+
+  // Removes and returns the entries committed since the last call — the range
+  // (last_applied_, commit_index_] — advancing the apply cursor. This is the
+  // minimal analogue of etcd/raft's Ready.CommittedEntries.
+  std::vector<LogEntry> TakeCommitted();
+
   Role role() const { return role_; }
   Term term() const { return current_term_; }
   NodeId id() const { return config_.id; }
   NodeId leader() const { return leader_; }  // 0 if unknown.
   NodeId voted_for() const { return voted_for_; }
+  uint64_t commit_index() const { return commit_index_; }
+  uint64_t last_index() const { return LastIndex(); }
+  // Read-only introspection for tests: the entry at a log index (0 = sentinel).
+  const LogEntry& entry_at(uint64_t index) const { return log_[index]; }
 
   // The hard state (current_term_, voted_for_) is what a real Raft must persist
   // before responding. It is marked dirty on change so the caller knows when a
@@ -66,9 +83,23 @@ class Raft {
   void StepLeader(const Message& msg);
 
   void HandleRequestVote(const Message& msg);
-  void BroadcastHeartbeat();
+  void HandleAppendEntries(const Message& msg);      // follower / candidate side
+  void HandleAppendEntriesResp(const Message& msg);  // leader side
+  void BroadcastAppendEntries();                     // to every peer
+  void SendAppendEntries(NodeId peer);               // empty entries == heartbeat
+  void MaybeCommit();                                // leader advances commit_index_
   size_t QuorumSize() const;
   void Send(const Message& msg);
+
+  // Log accessors. log_ carries an index-0 sentinel {term:0,index:0} so that a
+  // 1-based Raft index i lives at log_[i]; LastIndex() is log_.size()-1 and
+  // TermAt(0) is 0, which makes prev_log_index==0 pass the consistency check
+  // without special-casing an empty log. (etcd/raft instead splits log into an
+  // unstable buffer plus a truncatable storage offset; the sentinel is a
+  // deliberate simplification for a learning project.)
+  uint64_t LastIndex() const;
+  Term LastTerm() const;
+  Term TermAt(uint64_t index) const;
 
   Config config_;
   Role role_ = Role::kFollower;
@@ -77,11 +108,22 @@ class Raft {
   Term current_term_ = 0;
   NodeId voted_for_ = 0;  // 0 = have not voted this term.
 
+  // Replicated log. Carries an index-0 sentinel (see LastIndex()), so the log is
+  // never empty and index i maps to log_[i].
+  std::vector<LogEntry> log_;
+  uint64_t commit_index_ = 0;   // Highest index known to be committed.
+  uint64_t last_applied_ = 0;   // Apply cursor drained by TakeCommitted().
+
   // Volatile state.
   NodeId leader_ = 0;
   int election_elapsed_ = 0;
   int heartbeat_elapsed_ = 0;
   std::vector<NodeId> votes_granted_;  // Peers that voted for us this term.
+
+  // Leader-only volatile state, reset on each election win: for every peer, the
+  // next log index to send and the highest index known to be replicated there.
+  std::map<NodeId, uint64_t> next_index_;
+  std::map<NodeId, uint64_t> match_index_;
 
   bool hard_state_dirty_ = false;
   std::vector<Message> out_msgs_;

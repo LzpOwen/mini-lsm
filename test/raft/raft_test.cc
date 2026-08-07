@@ -3,6 +3,8 @@
 #include <gtest/gtest.h>
 
 #include <map>
+#include <set>
+#include <string>
 #include <vector>
 
 #include "mlsm/raft/messages.h"
@@ -34,6 +36,15 @@ class Cluster {
 
   Raft& node(NodeId id) { return nodes_.at(id); }
 
+  bool Propose(NodeId id, const std::string& data) {
+    return nodes_.at(id).Propose(data);
+  }
+
+  // Simulates a network partition: messages to or from a blocked node are
+  // dropped in DeliverAll until it is unblocked.
+  void Block(NodeId id) { blocked_.insert(id); }
+  void Unblock(NodeId id) { blocked_.erase(id); }
+
   void Tick(NodeId id) { nodes_.at(id).Tick(); }
 
   void TickAll() {
@@ -62,11 +73,23 @@ class Cluster {
       std::vector<Message> batch;
       batch.swap(pending_);
       for (const Message& m : batch) {
+        // Drop messages crossing a partition boundary (either endpoint blocked).
+        if (blocked_.count(m.to) || blocked_.count(m.from)) continue;
         auto it = nodes_.find(m.to);
         if (it == nodes_.end()) continue;
         it->second.Step(m);
         Collect(m.to);
       }
+    }
+  }
+
+  // Ticks the whole cluster and delivers messages for a number of rounds, the
+  // usual way to let a leader replicate and heartbeat over time.
+  void RunRounds(int rounds) {
+    for (int i = 0; i < rounds; ++i) {
+      TickAll();
+      CollectAll();
+      DeliverAll();
     }
   }
 
@@ -78,6 +101,7 @@ class Cluster {
 
   std::map<NodeId, Raft> nodes_;
   std::vector<Message> pending_;
+  std::set<NodeId> blocked_;  // Partitioned nodes; their messages are dropped.
 };
 
 }  // namespace
@@ -222,4 +246,221 @@ TEST(RaftElection, HardStateDirtyTracksTermAndVote) {
 
   c.node(1).clear_hard_state_dirty();
   EXPECT_FALSE(c.node(1).hard_state_dirty());
+}
+
+// ---- raft-2: log replication ----------------------------------------------
+
+// Helper: drive node 1 to leadership of a fresh cluster of n nodes.
+static void ElectLeader1(Cluster& c) {
+  c.TickUntilElection(1);
+  c.DeliverAll();
+  ASSERT_EQ(c.node(1).role(), Role::kLeader);
+}
+
+TEST(RaftLog, LeaderReplicatesEntryToFollowers) {
+  Cluster c(3);
+  ElectLeader1(c);
+
+  ASSERT_TRUE(c.Propose(1, "x"));
+  c.RunRounds(3);  // Heartbeat carries the entry; followers append it.
+
+  for (NodeId id : {1u, 2u, 3u}) {
+    EXPECT_EQ(c.node(id).last_index(), 1u);
+    EXPECT_EQ(c.node(id).entry_at(1).data, "x");
+    EXPECT_EQ(c.node(id).entry_at(1).term, 1u);
+  }
+}
+
+TEST(RaftLog, CommitAdvancesOnMajorityAck) {
+  Cluster c(3);
+  ElectLeader1(c);
+
+  ASSERT_TRUE(c.Propose(1, "a"));
+  c.RunRounds(3);
+
+  // A majority (leader + at least one follower) acked, so the entry commits and
+  // the commit index propagates to followers via the next heartbeat.
+  EXPECT_EQ(c.node(1).commit_index(), 1u);
+  EXPECT_EQ(c.node(2).commit_index(), 1u);
+  EXPECT_EQ(c.node(3).commit_index(), 1u);
+}
+
+TEST(RaftLog, TakeCommittedDrainsNewlyCommitted) {
+  Cluster c(3);
+  ElectLeader1(c);
+
+  ASSERT_TRUE(c.Propose(1, "hello"));
+  c.RunRounds(3);
+
+  std::vector<LogEntry> committed = c.node(1).TakeCommitted();
+  ASSERT_EQ(committed.size(), 1u);
+  EXPECT_EQ(committed[0].data, "hello");
+  EXPECT_EQ(committed[0].index, 1u);
+
+  // Draining again yields nothing: the apply cursor already advanced.
+  EXPECT_TRUE(c.node(1).TakeCommitted().empty());
+}
+
+TEST(RaftLog, FollowerCatchesUpAfterPartition) {
+  Cluster c(3);
+  ElectLeader1(c);
+
+  // Node 3 is partitioned away while three entries replicate to {1, 2}.
+  c.Block(3);
+  ASSERT_TRUE(c.Propose(1, "a"));
+  ASSERT_TRUE(c.Propose(1, "b"));
+  ASSERT_TRUE(c.Propose(1, "c"));
+  c.RunRounds(5);
+
+  EXPECT_EQ(c.node(2).last_index(), 3u);
+  EXPECT_EQ(c.node(1).commit_index(), 3u);  // Majority {1,2} is enough.
+  EXPECT_EQ(c.node(3).last_index(), 0u);    // Still empty behind the partition.
+
+  // Heal the partition: the leader backfills node 3 from its heartbeats.
+  c.Unblock(3);
+  c.RunRounds(5);
+
+  EXPECT_EQ(c.node(3).last_index(), 3u);
+  EXPECT_EQ(c.node(3).entry_at(3).data, "c");
+  EXPECT_EQ(c.node(3).commit_index(), 3u);
+}
+
+TEST(RaftLog, ConflictingSuffixIsOverwritten) {
+  // Drive a single follower with crafted AppendEntries to force a conflict.
+  Cluster c(3);
+  Raft& f = c.node(2);
+
+  // Leader of term 1 replicates three entries.
+  Message a1;
+  a1.type = MessageType::kAppendEntries;
+  a1.from = 1;
+  a1.to = 2;
+  a1.term = 1;
+  a1.prev_log_index = 0;
+  a1.prev_log_term = 0;
+  a1.entries = {LogEntry{1, 1, "a"}, LogEntry{1, 2, "b"}, LogEntry{1, 3, "c"}};
+  f.Step(a1);
+  ASSERT_EQ(f.last_index(), 3u);
+  f.TakeMessages();
+
+  // A new leader (term 2) overwrites from index 2 onward. Index 1 still matches
+  // and is kept; index 2's conflicting term truncates it and the tail.
+  Message a2;
+  a2.type = MessageType::kAppendEntries;
+  a2.from = 3;
+  a2.to = 2;
+  a2.term = 2;
+  a2.prev_log_index = 1;
+  a2.prev_log_term = 1;
+  a2.entries = {LogEntry{2, 2, "X"}};
+  f.Step(a2);
+
+  EXPECT_EQ(f.last_index(), 2u);
+  EXPECT_EQ(f.entry_at(1).data, "a");   // Unchanged.
+  EXPECT_EQ(f.entry_at(2).data, "X");   // Overwritten.
+  EXPECT_EQ(f.entry_at(2).term, 2u);
+}
+
+TEST(RaftLog, StaleAppendEntriesIsRejected) {
+  // A follower rejects AppendEntries when it lacks the prev entry (log gap).
+  Cluster c(3);
+  Raft& f = c.node(2);
+
+  Message ae;
+  ae.type = MessageType::kAppendEntries;
+  ae.from = 1;
+  ae.to = 2;
+  ae.term = 1;
+  ae.prev_log_index = 5;  // Follower's log is empty; nothing at index 5.
+  ae.prev_log_term = 1;
+  ae.entries = {LogEntry{1, 6, "z"}};
+  f.Step(ae);
+
+  std::vector<Message> out = f.TakeMessages();
+  ASSERT_EQ(out.size(), 1u);
+  EXPECT_EQ(out[0].type, MessageType::kAppendEntriesResp);
+  EXPECT_FALSE(out[0].success);
+  EXPECT_EQ(f.last_index(), 0u);  // Nothing appended.
+}
+
+TEST(RaftLog, LeaderRetriesWithLowerIndexAfterRejection) {
+  Cluster c(3);
+  ElectLeader1(c);
+
+  // Get node 2 replicated to index 1 so its next_index is 2.
+  ASSERT_TRUE(c.Propose(1, "a"));
+  c.RunRounds(3);
+  ASSERT_EQ(c.node(2).last_index(), 1u);
+
+  // A rejection should walk next_index back so the next AppendEntries resends
+  // from a lower prev_log_index.
+  Message reject;
+  reject.type = MessageType::kAppendEntriesResp;
+  reject.from = 2;
+  reject.to = 1;
+  reject.term = c.node(1).term();
+  reject.success = false;
+  c.node(1).Step(reject);
+
+  c.node(1).TakeMessages();  // Discard anything queued.
+  c.Tick(1);                 // Trigger a fresh broadcast.
+  std::vector<Message> out = c.node(1).TakeMessages();
+
+  bool saw_retry = false;
+  for (const Message& m : out) {
+    if (m.type == MessageType::kAppendEntries && m.to == 2) {
+      EXPECT_EQ(m.prev_log_index, 0u);  // Walked back from 1.
+      saw_retry = true;
+    }
+  }
+  EXPECT_TRUE(saw_retry);
+}
+
+TEST(RaftLog, VoteGrantedWhenCandidateLogUpToDate) {
+  Cluster c(3);
+  Raft& v = c.node(1);  // Empty log, term 0.
+
+  Message rv;
+  rv.type = MessageType::kRequestVote;
+  rv.from = 2;
+  rv.to = 1;
+  rv.term = 1;
+  rv.last_log_index = 0;
+  rv.last_log_term = 0;  // Equally empty log is up-to-date enough.
+  v.Step(rv);
+
+  std::vector<Message> out = v.TakeMessages();
+  ASSERT_EQ(out.size(), 1u);
+  EXPECT_TRUE(out[0].vote_granted);
+}
+
+TEST(RaftLog, VoteDeniedWhenCandidateLogBehind) {
+  Cluster c(3);
+  Raft& v = c.node(1);
+
+  // Give the voter one entry at term 1 so its log is ahead of the candidate's.
+  Message ae;
+  ae.type = MessageType::kAppendEntries;
+  ae.from = 3;
+  ae.to = 1;
+  ae.term = 1;
+  ae.prev_log_index = 0;
+  ae.prev_log_term = 0;
+  ae.entries = {LogEntry{1, 1, "a"}};
+  v.Step(ae);
+  v.TakeMessages();
+
+  // Candidate at a higher term but with an empty (stale) log must be denied.
+  Message rv;
+  rv.type = MessageType::kRequestVote;
+  rv.from = 2;
+  rv.to = 1;
+  rv.term = 2;
+  rv.last_log_index = 0;
+  rv.last_log_term = 0;
+  v.Step(rv);
+
+  std::vector<Message> out = v.TakeMessages();
+  ASSERT_EQ(out.size(), 1u);
+  EXPECT_FALSE(out[0].vote_granted);
 }
