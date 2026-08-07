@@ -10,11 +10,24 @@ cc_library(
     includes = ["include"],
 )
 
+# 确定性 Raft 核心。只依赖 header-only 的 Status/Slice，不碰存储引擎，单独成库
+# 保持依赖单向。src/*.cc 的单层 glob 不会误收 src/raft/，故 :mlsm 无需改动。
+cc_library(
+    name = "mlsm_raft",
+    srcs = glob(["src/raft/*.cc"]),
+    hdrs = glob(["include/mlsm/raft/*.h"]),
+    includes = ["include"],
+)
+
 cc_test(
     name = "mlsm_test",
-    srcs = glob(["test/*.cc"]),
+    srcs = glob([
+        "test/*.cc",
+        "test/raft/*.cc",
+    ]),
     deps = [
         ":mlsm",
+        ":mlsm_raft",
         "@googletest//:gtest_main",
     ],
 )

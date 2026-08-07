@@ -22,6 +22,15 @@ add_library(mlsm
 )
 target_include_directories(mlsm PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+# ---- raft library ----
+# Deterministic Raft core. Depends only on header-only Status/Slice, not on the
+# storage engine, so it is its own library to keep the dependency direction
+# one-way (a future integration layer will depend on both).
+add_library(mlsm_raft
+  src/raft/raft.cc
+)
+target_include_directories(mlsm_raft PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
 # ---- googletest via FetchContent ----
 include(FetchContent)
 FetchContent_Declare(
@@ -43,8 +52,9 @@ add_executable(mlsm_test
   test/wal_writer_test.cc
   test/wal_reader_test.cc
   test/db_test.cc
+  test/raft/raft_test.cc
 )
-target_link_libraries(mlsm_test PRIVATE mlsm GTest::gtest_main)
+target_link_libraries(mlsm_test PRIVATE mlsm mlsm_raft GTest::gtest_main)
 gtest_discover_tests(mlsm_test)
 
 # ---- benchmark (manual perf tool, not part of ctest) ----

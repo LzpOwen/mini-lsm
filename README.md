@@ -44,10 +44,20 @@ bazel build //...    # 只编译
 - [x] commit 5：DB 接口 + WAL 打通写路径 + 崩溃恢复
 - [x] commit 6：benchmark 骨架
 
+### 分布式（Raft）
+
+确定性消息驱动核心（对齐 etcd/raft、TiKV raft-rs）：纯状态机，`Step(msg)` + `Tick()` 输入，产出待发消息，不起线程、不碰真实时间。独立 `mlsm_raft` 库。
+
+- [x] raft-1：Leader 选举（term/votedFor、RequestVote、选举超时与心跳、角色转换）
+- [ ] raft-2：日志复制（AppendEntries、日志 up-to-date 比较、commit index）
+- [ ] raft-3：hard state 持久化 + 崩溃恢复
+- [ ] raft-4：接到 DB 写路径（Put/Delete 走 Raft 日志）
+
 ## 布局
 
 ```
-include/mlsm/   公共头文件
-src/            实现
-test/           单测
+include/mlsm/       公共头文件
+include/mlsm/raft/  Raft 核心头
+src/                实现（src/raft/ 为 Raft）
+test/               单测（test/raft/ 为 Raft）
 ```
