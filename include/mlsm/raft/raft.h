@@ -57,6 +57,14 @@ class Raft {
   // minimal analogue of etcd/raft's Ready.CommittedEntries.
   std::vector<LogEntry> TakeCommitted();
 
+  // Reinstalls persisted state after a restart. Call once, right after
+  // construction and before feeding any message: sets the hard state and
+  // repopulates the log from `entries` (which must be in index order starting
+  // at 1), marks everything as already stable, and clears the dirty flag.
+  // commit_index is intentionally not restored — a leader's AppendEntries
+  // re-advances it (etcd/raft instead persists commit inside its HardState).
+  void Restore(Term term, NodeId vote, const std::vector<LogEntry>& entries);
+
   Role role() const { return role_; }
   Term term() const { return current_term_; }
   NodeId id() const { return config_.id; }
@@ -66,6 +74,14 @@ class Raft {
   uint64_t last_index() const { return LastIndex(); }
   // Read-only introspection for tests: the entry at a log index (0 = sentinel).
   const LogEntry& entry_at(uint64_t index) const { return log_[index]; }
+
+  // Persistence watermark: the highest log index the caller has durably written.
+  // The integration layer (RaftStorage) reads it to know which entries still
+  // need flushing, and lowers it via set_stable_index() when a conflict
+  // truncation invalidates already-persisted entries. The core itself does no
+  // I/O; this is just a marker it maintains for the caller.
+  uint64_t stable_index() const { return stable_index_; }
+  void set_stable_index(uint64_t index) { stable_index_ = index; }
 
   // The hard state (current_term_, voted_for_) is what a real Raft must persist
   // before responding. It is marked dirty on change so the caller knows when a
@@ -113,6 +129,7 @@ class Raft {
   std::vector<LogEntry> log_;
   uint64_t commit_index_ = 0;   // Highest index known to be committed.
   uint64_t last_applied_ = 0;   // Apply cursor drained by TakeCommitted().
+  uint64_t stable_index_ = 0;   // Highest index the caller has durably stored.
 
   // Volatile state.
   NodeId leader_ = 0;

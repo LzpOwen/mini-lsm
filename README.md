@@ -50,7 +50,7 @@ bazel build //...    # 只编译
 
 - [x] raft-1：Leader 选举（term/votedFor、RequestVote、选举超时与心跳、角色转换）
 - [x] raft-2：日志复制（AppendEntries、日志 up-to-date 比较、commit index）
-- [ ] raft-3：hard state 持久化 + 崩溃恢复
+- [x] raft-3：持久化 + 崩溃恢复（hard state + 日志 entries，复用 WAL 格式；集成层 `mlsm_raft_store`）
 - [ ] raft-4：接到 DB 写路径（Put/Delete 走 Raft 日志）
 
 ## 布局

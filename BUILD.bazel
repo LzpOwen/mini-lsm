@@ -12,11 +12,25 @@ cc_library(
 
 # 确定性 Raft 核心。只依赖 header-only 的 Status/Slice，不碰存储引擎，单独成库
 # 保持依赖单向。src/*.cc 的单层 glob 不会误收 src/raft/，故 :mlsm 无需改动。
+# storage.cc 是集成层（依赖 :mlsm），从核心 glob 里排除，见 :mlsm_raft_store。
 cc_library(
     name = "mlsm_raft",
-    srcs = glob(["src/raft/*.cc"]),
+    srcs = glob(["src/raft/*.cc"], exclude = ["src/raft/storage.cc"]),
     hdrs = glob(["include/mlsm/raft/*.h"]),
     includes = ["include"],
+)
+
+# Raft 持久化集成层：连接 I/O-free 的 Raft 核心与存储引擎的 WAL/Env，故它是
+# 唯一同时依赖 :mlsm 和 :mlsm_raft 的 raft 组件。
+cc_library(
+    name = "mlsm_raft_store",
+    srcs = ["src/raft/storage.cc"],
+    hdrs = ["include/mlsm/raft/storage.h"],
+    includes = ["include"],
+    deps = [
+        ":mlsm",
+        ":mlsm_raft",
+    ],
 )
 
 cc_test(
@@ -28,6 +42,7 @@ cc_test(
     deps = [
         ":mlsm",
         ":mlsm_raft",
+        ":mlsm_raft_store",
         "@googletest//:gtest_main",
     ],
 )

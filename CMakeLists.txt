@@ -31,6 +31,15 @@ add_library(mlsm_raft
 )
 target_include_directories(mlsm_raft PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+# ---- raft persistence (integration layer) ----
+# The bridge between the I/O-free Raft core and the storage engine's WAL/Env, so
+# this is the one raft component that links both mlsm and mlsm_raft.
+add_library(mlsm_raft_store
+  src/raft/storage.cc
+)
+target_include_directories(mlsm_raft_store PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(mlsm_raft_store PUBLIC mlsm mlsm_raft)
+
 # ---- googletest via FetchContent ----
 include(FetchContent)
 FetchContent_Declare(
@@ -53,8 +62,9 @@ add_executable(mlsm_test
   test/wal_reader_test.cc
   test/db_test.cc
   test/raft/raft_test.cc
+  test/raft/storage_test.cc
 )
-target_link_libraries(mlsm_test PRIVATE mlsm mlsm_raft GTest::gtest_main)
+target_link_libraries(mlsm_test PRIVATE mlsm mlsm_raft mlsm_raft_store GTest::gtest_main)
 gtest_discover_tests(mlsm_test)
 
 # ---- benchmark (manual perf tool, not part of ctest) ----

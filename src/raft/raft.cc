@@ -173,6 +173,9 @@ void Raft::HandleAppendEntries(const Message& msg) {
     if (e.index <= LastIndex()) {
       if (TermAt(e.index) == e.term) continue;  // Already consistent.
       log_.resize(e.index);                      // Drop conflict and its suffix.
+      // If the dropped suffix was already persisted, lower the watermark so the
+      // caller knows to truncate its durable log too.
+      if (stable_index_ >= e.index) stable_index_ = e.index - 1;
     }
     log_.push_back(e);
   }
@@ -317,6 +320,17 @@ std::vector<LogEntry> Raft::TakeCommitted() {
   }
   last_applied_ = commit_index_;
   return out;
+}
+
+void Raft::Restore(Term term, NodeId vote,
+                   const std::vector<LogEntry>& entries) {
+  current_term_ = term;
+  voted_for_ = vote;
+  // log_ already holds just the index-0 sentinel from construction; append the
+  // recovered entries after it so index i lands at log_[i].
+  for (const LogEntry& e : entries) log_.push_back(e);
+  stable_index_ = LastIndex();   // Everything recovered is already durable.
+  hard_state_dirty_ = false;     // Nothing new to persist yet.
 }
 
 uint64_t Raft::LastIndex() const { return log_.size() - 1; }
