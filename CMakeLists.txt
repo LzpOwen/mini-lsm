@@ -36,6 +36,7 @@ target_include_directories(mlsm_raft PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 # this is the one raft component that links both mlsm and mlsm_raft.
 add_library(mlsm_raft_store
   src/raft/storage.cc
+  src/raft/replicated_db.cc
 )
 target_include_directories(mlsm_raft_store PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(mlsm_raft_store PUBLIC mlsm mlsm_raft)
@@ -63,6 +64,7 @@ add_executable(mlsm_test
   test/db_test.cc
   test/raft/raft_test.cc
   test/raft/storage_test.cc
+  test/raft/replicated_db_test.cc
 )
 target_link_libraries(mlsm_test PRIVATE mlsm mlsm_raft mlsm_raft_store GTest::gtest_main)
 gtest_discover_tests(mlsm_test)

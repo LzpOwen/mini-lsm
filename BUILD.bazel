@@ -24,8 +24,14 @@ cc_library(
 # 唯一同时依赖 :mlsm 和 :mlsm_raft 的 raft 组件。
 cc_library(
     name = "mlsm_raft_store",
-    srcs = ["src/raft/storage.cc"],
-    hdrs = ["include/mlsm/raft/storage.h"],
+    srcs = [
+        "src/raft/replicated_db.cc",
+        "src/raft/storage.cc",
+    ],
+    hdrs = [
+        "include/mlsm/raft/replicated_db.h",
+        "include/mlsm/raft/storage.h",
+    ],
     includes = ["include"],
     deps = [
         ":mlsm",

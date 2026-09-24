@@ -309,7 +309,12 @@ void Raft::MaybeCommit() {
 bool Raft::Propose(const std::string& data) {
   if (role_ != Role::kLeader) return false;
   log_.push_back(LogEntry{current_term_, LastIndex() + 1, data});
-  // Replication rides on the next broadcast (Tick heartbeat or an explicit one).
+  // Replication to peers rides on the next broadcast. Try to commit right away:
+  // a single-node cluster is its own majority and must advance immediately;
+  // with peers MaybeCommit only counts this node, so it can't over-commit
+  // before acks arrive (and 5.4.2's current-term rule still holds — the entry
+  // was appended at current_term_).
+  MaybeCommit();
   return true;
 }
 
